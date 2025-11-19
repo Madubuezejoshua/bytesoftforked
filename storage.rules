@@ -1,0 +1,65 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role');
+    }
+
+    function isCoordinator() {
+      return isAuthenticated() && (
+        getUserRole() == 'coordinator' ||
+        getUserRole() == 'admin'
+      );
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && getUserRole() == 'teacher';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && getUserRole() == 'student';
+    }
+
+    // Course thumbnails - coordinators can upload, teachers can upload
+    match /course-thumbnails/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (isCoordinator() || isTeacher());
+      allow delete: if isAuthenticated() && isCoordinator();
+    }
+
+    // User profile pictures - users can upload their own
+    match /profile-pictures/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isCoordinator();
+    }
+
+    // Meeting recordings - teachers and coordinators can upload
+    match /meeting-recordings/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (isTeacher() || isCoordinator());
+      allow delete: if isAuthenticated() && isCoordinator();
+    }
+
+    // Assignment submissions - students can upload
+    match /assignments/{assignmentId}/submissions/{studentId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow create, update: if isStudent() && isOwner(studentId);
+      allow delete: if isCoordinator();
+    }
+
+    // Deny all other paths by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,395 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // IMPORTANT: Admin Verification
+    // For admins to function properly, ensure:
+    // 1. An admin document exists at /admins/{adminUID} with {role: 'admin'}
+    // 2. OR the user document at /users/{adminUID} has {role: 'admin'}
+    // Without this, all admin operations (delete, manage accounts) will fail with "permission-denied"
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isCoordinator() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator') ||
+        isAdmin()
+      );
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher') ||
+        isAdmin()
+      );
+    }
+
+    function isStudent() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student'
+      );
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Students can only read their own data (non-verification fields)
+      allow read: if isStudent() && isOwner(userId);
+      // Coordinators can read all users (for managing students)
+      allow read: if isCoordinator();
+      // Teachers can read other teachers (for viewing profiles)
+      allow read: if isTeacher() &&
+        get(/databases/$(database)/documents/users/$(userId)).data.role == 'teacher';
+      // Admin can read all
+      allow read: if isAdmin();
+
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+
+      // Students can only update their own non-sensitive fields
+      // Explicitly prevent any modification of verification-related fields
+      allow update: if isOwner(userId) && (
+        request.resource.data.keys().hasOnly(['fullName', 'username', 'profilePicture', 'debitAccount', 'email', 'name', 'role', 'customUserId', 'createdAt']) &&
+        !('isVerified' in request.resource.data.keys()) &&
+        !('verified' in request.resource.data.keys()) &&
+        !('verificationType' in request.resource.data.keys()) &&
+        !('purchasedCourses' in request.resource.data.keys()) &&
+        !('verifiedBy' in request.resource.data.keys()) &&
+        !('verifiedAt' in request.resource.data.keys())
+      );
+
+      // Coordinators can update students' purchasedCourses and verificationType for manual verification
+      // CRITICAL PROTECTION: Cannot change verificationType from 'paystack' to anything else
+      // This prevents accidental or malicious overwrite of Paystack verification
+      allow update: if isCoordinator() && (
+        request.resource.data.keys().hasOnly([
+          'purchasedCourses', 'isVerified', 'verified', 'verificationType',
+          'verifiedBy', 'verifiedAt', 'email', 'name', 'role', 'customUserId',
+          'createdAt', 'fullName', 'username', 'profilePicture', 'debitAccount'
+        ])
+      ) && (
+        // CRITICAL: If existing user has paystack verificationType, reject any update
+        // This makes Paystack verification immutable
+        (!('verificationType' in resource.data) || resource.data.verificationType != 'paystack') &&
+        // Allow creation of manual verification only if not already verified via paystack
+        (request.resource.data.verificationType == 'manual' &&
+         (!('verificationType' in resource.data) || resource.data.verificationType != 'paystack'))
+      );
+
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Courses collection
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isCoordinator();
+      allow delete: if isAdmin() || (isTeacher() && resource.data.instructorId == request.auth.uid);
+    }
+
+    // Enrollments collection
+    match /enrollments/{enrollmentId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isCoordinator() ||
+        isTeacher() ||
+        isStudent()
+      );
+      allow create: if isAuthenticated();
+      allow update: if isCoordinator();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+    }
+
+    // Scheduled Classes collection (snake_case version)
+    match /scheduled_classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Class Attendance collection (snake_case version)
+    match /class_attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isTeacher() ||
+        isCoordinator()
+      );
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+    }
+
+    // Grades collection
+    match /grades/{gradeId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isCoordinator() ||
+        isTeacher()
+      );
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin();
+    }
+
+    // Assignments collection
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin();
+    }
+
+    // Submissions collection
+    match /submissions/{submissionId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isTeacher() ||
+        isCoordinator()
+      );
+      allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
+      allow update: if isOwner(resource.data.studentId) || isTeacher() || isCoordinator();
+      allow delete: if isAdmin();
+    }
+
+    // Admin collection
+    match /admins/{adminId} {
+      allow read: if isAuthenticated() && request.auth.uid == adminId;
+      allow write: if false;
+    }
+
+    // Access Codes collection
+    match /accessCodes/{codeId} {
+      // Allow anyone to read codes (needed for validation during signup)
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      // Allow users to mark codes as used during signup (changing status from 'unused' to 'used')
+      allow update: if isAdmin() ||
+                     (isAuthenticated() &&
+                      resource.data.status == 'unused' &&
+                      request.resource.data.status == 'used' &&
+                      request.resource.data.usedBy == request.auth.uid);
+    }
+
+    // Used Custom IDs collection (tracks all used custom IDs for uniqueness checking)
+    match /usedCustomIds/{idDoc} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // User Accounts collection
+    match /userAccounts/{accountId} {
+      allow read: if isAuthenticated();
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // User Roles collection
+    match /userRoles/{roleId} {
+      allow read: if isAuthenticated();
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // Audit Logs collection
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // Scheduled Classes collection (fix typo from previous rules)
+    match /scheduledClasses/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Class Attendance collection (fix typo from previous rules)
+    match /classAttendance/{attendanceId} {
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid ||
+        isTeacher() ||
+        isCoordinator()
+      );
+      allow create, update: if isTeacher() || isCoordinator();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+    }
+
+    // Meetings collection
+    match /meetings/{meetingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isTeacher() || isAdmin());
+      allow update: if isAuthenticated() && (
+        resource.data.teacherId == request.auth.uid ||
+        isTeacher() ||
+        isCoordinator()
+      );
+      allow delete: if isAdmin() || isCoordinator() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Course Requests collection
+    match /course_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.teacherId == request.auth.uid ||
+        isCoordinator() ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isTeacher() &&
+        request.resource.data.teacherId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isCoordinator() || isAdmin()
+      );
+      allow delete: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (
+        resource.data.teacherId == request.auth.uid ||
+        isCoordinator() ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && (
+        isCoordinator() || isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        resource.data.teacherId == request.auth.uid ||
+        isCoordinator() ||
+        isAdmin()
+      );
+      allow delete: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Activity Logs collection
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated() && (
+        isCoordinator() || isAdmin()
+      );
+      allow create: if isAuthenticated() && (
+        isCoordinator() || isAdmin()
+      );
+      allow update, delete: if false;
+    }
+
+    // Teacher Reviews collection
+    match /teacher_reviews/{reviewId} {
+      // Coordinators and admins can read all reviews
+      allow read: if isCoordinator() || isAdmin();
+      // Teachers can read reviews about themselves
+      allow read: if isTeacher() && resource.data.teacherId == request.auth.uid;
+      // Students can read reviews (filtered by UI to show only published reviews)
+      allow read: if isStudent();
+
+      // Only coordinators can create coordinator reviews
+      allow create: if isAuthenticated() && (
+        (isCoordinator() && request.resource.data.coordinatorId == request.auth.uid && request.resource.data.reviewerType == 'coordinator') ||
+        (isStudent() && request.resource.data.studentId == request.auth.uid && request.resource.data.reviewerType == 'student')
+      );
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin() ||
+        (isStudent() && resource.data.studentId == request.auth.uid) ||
+        (isCoordinator() && resource.data.coordinatorId == request.auth.uid) ||
+        (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // Payments collection
+    match /payments/{paymentId} {
+      // Users can read their own payments
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Coordinators can read all payments for verification
+      allow read: if isCoordinator() || isAdmin();
+      // Only Cloud Functions can create/update payments
+      allow create, update, delete: if false;
+    }
+
+    // Courses subcollections for students and subcollections for enrollments
+    match /courses/{courseId}/students/{userId} {
+      // Users can read their own enrollment in courses
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Teachers and coordinators can read all student enrollments in courses
+      allow read: if isTeacher() || isCoordinator() || isAdmin();
+      // Only authenticated users can create (via Cloud Function)
+      allow create: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Course teachers subcollection
+    match /courses/{courseId}/teachers/{teacherId} {
+      // Coordinators and admins can read all teachers assigned to a course
+      allow read: if isCoordinator() || isAdmin();
+      // Teachers can read themselves on a course
+      allow read: if isTeacher() && request.auth.uid == teacherId;
+      allow create, update: if isCoordinator() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Course reviews subcollection (student reviews about the course)
+    match /courses/{courseId}/reviews/{reviewId} {
+      // Coordinators and admins can read all reviews
+      allow read: if isCoordinator() || isAdmin();
+      // Students can read reviews (for transparency)
+      allow read: if isStudent();
+      // Only coordinators can create and update
+      allow create: if isCoordinator() || isAdmin();
+      allow update: if isCoordinator() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Course sessions subcollection (classes held)
+    match /courses/{courseId}/sessions/{sessionId} {
+      // Coordinators, teachers, and admins can read sessions
+      allow read: if isCoordinator() || isTeacher() || isAdmin();
+      // Teachers and coordinators can create and update
+      allow create, update: if isTeacher() || isCoordinator() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId}/enrollments/{courseId} {
+      // Users can read their own enrollments
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Only authenticated users can create (via Cloud Function)
+      allow create: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Received Links subcollection for students
+    match /users/{userId}/receivedLinks/{linkId} {
+      // Students can read their own received links
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Coordinators and admins can read all received links for oversight
+      allow read: if isCoordinator() || isAdmin();
+      // Teachers can create links for students
+      allow create: if isAuthenticated() && isTeacher();
+      // Allow updates by admins only
+      allow update: if isAdmin();
+      // Students can delete their own links
+      allow delete: if isAuthenticated() && request.auth.uid == userId || isAdmin();
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

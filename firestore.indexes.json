@@ -1,0 +1,175 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "meetings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "meetings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "participants",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "scheduledTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "meetings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "course_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "course_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "course_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "courseId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "enrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "studentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "enrolledAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "enrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "scheduled_classes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "teacher_reviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "reviewerType",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "teacher_reviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teacherId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "teacher_reviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "coordinatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
